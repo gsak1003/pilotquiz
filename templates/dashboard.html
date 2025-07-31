@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대시보드</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background-color: white; padding: 40px 50px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 500px; text-align: center; }
+        h1 { font-size: 28px; color: #1c1e21; margin-top: 0; margin-bottom: 15px; }
+        p { color: #606770; margin-bottom: 30px; }
+        .part-list { list-style: none; padding: 0; }
+        .part-list li { margin-bottom: 15px; }
+        .part-list a { display: block; padding: 18px; background-color: #1877f2; border: none; border-radius: 6px; color: white; font-size: 18px; font-weight: bold; cursor: pointer; text-decoration: none; transition: background-color 0.2s; }
+        .part-list a:hover { background-color: #166fe5; }
+        .other-links { margin-top: 30px; }
+        .other-links a { color: #606770; text-decoration: none; margin: 0 15px; font-size: 14px; }
+
+        @media (max-width: 480px) {
+            .container { padding: 30px 20px; }
+            h1 { font-size: 24px; }
+            p { font-size: 15px; }
+            .part-list a { padding: 15px; font-size: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>학습 파트 선택</h1>
+        <p>학습하고 싶은 파트를 선택하여 퀴즈를 시작하세요.</p>
+        <ul id="part-list" class="part-list">
+            </ul>
+        <div class="other-links">
+            <a href="history.html">지난 시험 결과 보기</a>
+            <a href="#" id="logoutBtn">로그아웃</a>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const partList = document.getElementById('part-list');
+            
+            // 서버에 파트 목록을 요청합니다.
+            fetch('https://pilotquiz.onrender.com/api/parts')
+                .then(response => response.json())
+                .then(parts => {
+                    // 받은 파트 목록으로 링크를 생성합니다.
+                    parts.forEach(part => {
+                        const li = document.createElement('li');
+                        const a = document.createElement('a');
+                        a.href = `quiz.html?part=${encodeURIComponent(part.name)}`;
+                        a.textContent = part.name;
+                        li.appendChild(a);
+                        partList.appendChild(li);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching parts:', error);
+                    partList.innerHTML = '<li>파트 목록을 불러오는 데 실패했습니다.</li>';
+                });
+        });
+
+        document.getElementById('logoutBtn').addEventListener('click', function(event) {
+            event.preventDefault();
+            if (confirm('로그아웃하시겠습니까?')) {
+                sessionStorage.removeItem('userEmail');
+                window.location.href = 'index.html';
+            }
+        });
+    </script>
+</body>
+</html>

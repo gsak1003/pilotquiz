@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>지난 시험 결과</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 700px; text-align: center; }
+        h1 { margin-top: 0; font-size: 28px;}
+        table { width: 100%; border-collapse: collapse; margin-top: 30px; }
+        th, td { border: 1px solid #dddfe2; padding: 12px; }
+        th { background-color: #f0f2f5; font-weight: bold; }
+        .no-history { color: #606770; margin-top: 30px; }
+        .btn-home { display: inline-block; padding: 12px 25px; background-color: #1877f2; border-radius: 6px; color: white; text-decoration: none; font-weight: bold; margin-top: 30px;}
+
+        @media (max-width: 768px) {
+            body { padding-top: 20px; }
+            .container { padding: 20px; }
+            h1 { font-size: 22px; }
+            th, td {
+                padding: 8px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>지난 시험 결과</h1>
+        <div id="history-table-container"></div>
+        <p id="no-history" class="no-history" style="display: none;">아직 시험 기록이 없습니다.</p>
+        <a href="dashboard.html" class="btn-home">대시보드로 돌아가기</a>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const userEmail = sessionStorage.getItem('userEmail');
+            if (userEmail) {
+                fetch('https://pilotquiz.onrender.com/get-history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', },
+                    body: JSON.stringify({ user: userEmail })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('history-table-container');
+                    if (data.length > 0) {
+                        const table = document.createElement('table');
+                        table.innerHTML = `
+                            <thead>
+                                <tr>
+                                    <th>응시 날짜</th>
+                                    <th>파트</th>
+                                    <th>점수</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.map(record => `
+                                    <tr>
+                                        <td>${record.date}</td>
+                                        <td>${record.part}</td>
+                                        <td>${record.score} / ${record.total}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        `;
+                        container.appendChild(table);
+                    } else {
+                        document.getElementById('no-history').style.display = 'block';
+                    }
+                });
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+    </script>
+</body>
+</html>

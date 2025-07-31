@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>회원가입</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box;}
+        .container { background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 400px; text-align: center; }
+        h1 { font-size: 24px; color: #1c1e21; margin-bottom: 20px; }
+        input[type="email"], input[type="password"] { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #dddfe2; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #42b72a; border: none; border-radius: 6px; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .link { margin-top: 20px; font-size: 14px; color: #606770; }
+        .link a { color: #1877f2; text-decoration: none; }
+
+        @media (max-width: 480px) {
+            .container { padding: 20px; }
+            h1 { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>회원가입</h1>
+        <form id="signupForm">
+            <input type="email" id="email" placeholder="이메일 주소" required>
+            <input type="password" id="password" placeholder="비밀번호" required>
+            <input type="password" id="passwordConfirm" placeholder="비밀번호 확인" required>
+            <button type="submit">가입하기</button>
+        </form>
+        <div class="link">
+            이미 계정이 있으신가요? <a href="index.html">로그인</a>
+        </div>
+    </div>
+    <script>
+        const form = document.getElementById('signupForm');
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const passwordConfirm = document.getElementById('passwordConfirm').value;
+
+            if (password !== passwordConfirm) {
+                alert('비밀번호가 일치하지 않습니다.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('email', email);
+            formData.append('password', password);
+
+            fetch('https://pilotquiz.onrender.com/signup', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                if (data.success) {
+                    window.location.href = 'index.html';
+                }
+            })
+            .catch(error => {
+                alert('서버와 통신 중 오류가 발생했습니다.');
+                console.error('Error:', error);
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>비행이론 퀴즈</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; margin: 0; }
+        .quiz-layout { display: flex; }
+        /* 왼쪽 상태 창 스타일 */
+        .status-sidebar {
+            width: 200px;
+            background-color: #e9ebee;
+            padding: 20px;
+            height: 100vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box; /* 패딩이 너비에 포함되도록 설정 */
+        }
+        .status-sidebar h3 { margin-top: 0; }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 30px;
+            border: 2px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer; 
+            background-color: #fff;
+            color: #333;
+        }
+        .status-current { border-color: #1877f2; font-weight: bold; }
+        .status-answered { background-color: #42b72a; color: white; border-color: #42b72a; }
+        .status-skipped { background-color: #f5a623; color: white; border-color: #f5a623; }
+
+        /* 오른쪽 퀴즈 컨테이너 스타일 */
+        .quiz-main {
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .quiz-container { background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 600px; user-select: none; }
+        .question-header { font-size: 16px; color: #606770; margin-bottom: 10px; }
+        .question-text { font-size: 20px; font-weight: bold; margin-bottom: 30px; }
+        .options-list { list-style: none; padding: 0; }
+        .options-list li { background-color: #f0f2f5; border: 2px solid transparent; border-radius: 6px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
+        .options-list li:hover { border-color: #1877f2; }
+        
+        .btn { display: inline-block; padding: 12px 25px; border: none; border-radius: 6px; color: white; font-size: 16px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none; }
+        .button-group { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+        .btn-skip { background-color: #606770; }
+        .btn-submit { display: none; width: 100%; padding: 15px; background-color: #42b72a; }
+        .sidebar-footer { margin-top: auto; padding-top: 20px; }
+        .btn-dashboard { background-color: #6c757d; }
+
+        /* --- 모바일 화면을 위한 미디어 쿼리 --- */
+        @media (max-width: 768px) {
+            .quiz-layout {
+                flex-direction: column; /* 세로 방향으로 변경 */
+            }
+            .status-sidebar {
+                width: 100%; /* 너비 100% */
+                height: auto; /* 높이 자동 */
+                border-bottom: 2px solid #ddd;
+            }
+            .quiz-main {
+                height: auto;
+                padding: 15px; /* 모바일용 패딩 축소 */
+            }
+            .quiz-container {
+                padding: 20px; /* 모바일용 패딩 축소 */
+            }
+            .question-text {
+                font-size: 18px; /* 글씨 크기 축소 */
+            }
+            .options-list li {
+                padding: 12px;
+                font-size: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="quiz-layout">
+        <div class="status-sidebar">
+            <div>
+                <h3>진행 상황</h3>
+                <div id="status-grid" class="status-grid"></div>
+            </div>
+            <div class="sidebar-footer">
+                <a href="#" id="dashboard-btn" class="btn btn-dashboard">대시보드로 나가기</a>
+            </div>
+        </div>
+        <div class="quiz-main">
+            <div class="quiz-container">
+                <div id="quiz-content">
+                    <p id="question-header"></p>
+                    <h2 id="question-text"></h2>
+                    <ul id="options-list" class="options-list"></ul>
+                    <div class="button-group">
+                        <button id="skip-btn" class="btn btn-skip">건너뛰기</button>
+                    </div>
+                </div>
+                <button id="submit-btn" class="btn btn-submit">결과 보기</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('contextmenu', event => event.preventDefault());
+
+        const statusGrid = document.getElementById('status-grid');
+        const questionHeader = document.getElementById('question-header');
+        const questionText = document.getElementById('question-text');
+        const optionsList = document.getElementById('options-list');
+        const skipBtn = document.getElementById('skip-btn');
+        const submitBtn = document.getElementById('submit-btn');
+        const dashboardBtn = document.getElementById('dashboard-btn');
+
+        let currentQuestionIndex = 0;
+        let questions = [];
+        let userAnswers = [];
+        let questionStatus = []; 
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const selectedPart = urlParams.get('part');
+            if (!selectedPart) {
+                alert("학습할 파트를 먼저 선택해주세요.");
+                window.location.href = 'dashboard.html';
+                return;
+            }
+            fetch(`https://pilotquiz.onrender.com/get-questions?part=${encodeURIComponent(selectedPart)}`)
+                .then(response => response.json())
+                .then(data => {
+                    questions = data;
+                    if (questions.length === 0) {
+                        alert("해당 파트의 문제가 없습니다.");
+                        window.location.href = 'dashboard.html';
+                        return;
+                    }
+                    questionStatus = new Array(questions.length).fill('unanswered');
+                    sessionStorage.setItem('quizQuestions', JSON.stringify(questions));
+                    renderStatusSidebar();
+                    showQuestion(0);
+                });
+        });
+
+        function renderStatusSidebar() {
+            statusGrid.innerHTML = '';
+            questions.forEach((q, index) => {
+                const statusItem = document.createElement('div');
+                statusItem.id = `status-${index}`;
+                statusItem.className = 'status-item';
+                statusItem.textContent = index + 1;
+                statusItem.addEventListener('click', () => jumpToQuestion(index));
+                statusGrid.appendChild(statusItem);
+            });
+        }
+        
+        function updateStatus(index, status) {
+            questionStatus[index] = status;
+            const statusItem = document.getElementById(`status-${index}`);
+            statusItem.classList.remove('status-answered', 'status-skipped');
+            if (status !== 'unanswered') {
+                statusItem.classList.add(`status-${status}`);
+            }
+        }
+
+        function jumpToQuestion(newIndex) {
+            if (newIndex === currentQuestionIndex || newIndex >= questions.length) return;
+            showQuestion(newIndex);
+        }
+
+        function showQuestion(index) {
+            const prevItem = document.getElementById(`status-${currentQuestionIndex}`);
+            if (prevItem) prevItem.classList.remove('status-current');
+            currentQuestionIndex = index;
+            const currentItem = document.getElementById(`status-${currentQuestionIndex}`);
+            if (currentItem) currentItem.classList.add('status-current');
+            const currentQuestion = questions[currentQuestionIndex];
+            questionHeader.textContent = `문제 ${currentQuestionIndex + 1} / ${questions.length}`;
+            questionText.textContent = currentQuestion.question;
+            optionsList.innerHTML = ''; 
+            currentQuestion.options.forEach(option => {
+                const li = document.createElement('li');
+                li.textContent = option;
+                li.addEventListener('click', () => selectAnswer(option));
+                optionsList.appendChild(li);
+            });
+        }
+
+        function moveToNextQuestion() {
+            const allAnswered = questionStatus.every(status => status === 'answered' || status === 'skipped');
+            if (allAnswered) {
+                document.getElementById('quiz-content').style.display = 'none';
+                submitBtn.style.display = 'block';
+                submitBtn.textContent = `결과 보기 (${userAnswers.length} / ${questions.length} 문제 답변)`;
+            } else {
+                let nextIndex = (currentQuestionIndex + 1) % questions.length;
+                while (questionStatus[nextIndex] !== 'unanswered') {
+                    nextIndex = (nextIndex + 1) % questions.length;
+                }
+                showQuestion(nextIndex);
+            }
+        }
+
+        function selectAnswer(selectedOption) {
+            const existingAnswerIndex = userAnswers.findIndex(ans => ans.questionId === questions[currentQuestionIndex].id);
+            if (existingAnswerIndex > -1) {
+                userAnswers[existingAnswerIndex].answer = selectedOption;
+            } else {
+                userAnswers.push({ questionId: questions[currentQuestionIndex].id, answer: selectedOption });
+            }
+            updateStatus(currentQuestionIndex, 'answered');
+            moveToNextQuestion();
+        }
+
+        skipBtn.addEventListener('click', () => {
+            updateStatus(currentQuestionIndex, 'skipped');
+            moveToNextQuestion();
+        });
+        
+        submitBtn.addEventListener('click', () => {
+            const userEmail = sessionStorage.getItem('userEmail');
+            fetch('https://pilotquiz.onrender.com/submit-quiz', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user: userEmail, answers: userAnswers, part: new URLSearchParams(window.location.search).get('part') })
+            })
+            .then(response => response.json())
+            .then(data => {
+                sessionStorage.setItem('quizResults', JSON.stringify(data));
+                window.location.href = 'results.html';
+            })
+            .catch(error => {
+                alert('결과를 제출하는 중 오류가 발생했습니다.');
+                console.error('Error:', error);
+            });
+        });
+        
+        dashboardBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            if (confirm('퀴즈를 중단하고 대시보드로 돌아가시겠습니까? 진행 상황은 저장되지 않습니다.')) {
+                window.location.href = 'dashboard.html';
+            }
+        });
+    </script>
+</body>
+</html>
