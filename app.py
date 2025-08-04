@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_cors import CORS
 from datetime import datetime, timedelta
@@ -10,28 +11,28 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-# Render.com 같은 외부 호스팅 환경에서 DATABASE_URL을 가져옵니다.
+# Render.com 환경 변수에서 데이터베이스 접속 정보를 가져옵니다.
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # --- 데이터베이스 연결 함수 ---
 def get_db_connection():
-    """데이터베이스 연결을 생성하고 반환합니다."""
+    """데이터베이스에 연결하고 커넥션 객체를 반환합니다."""
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
-# --- 데이터베이스 초기화 함수 ---
+# --- 데이터베이스 테이블 생성 함수 ---
 def init_db():
-    """필요한 모든 테이블을 생성합니다."""
+    """앱에 필요한 모든 테이블을 생성합니다. (테이블이 이미 존재하면 아무것도 하지 않습니다.)"""
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            # 파트 테이블 생성
+            # 파트(과목) 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS parts (
                     id SERIAL PRIMARY KEY,
                     name TEXT UNIQUE NOT NULL
                 )
             ''')
-            # 문제 테이블 생성
+            # 문제 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS questions (
                     id SERIAL PRIMARY KEY,
@@ -45,7 +46,7 @@ def init_db():
                     FOREIGN KEY (part_id) REFERENCES parts (id) ON DELETE CASCADE
                 )
             ''')
-            # 사용자 테이블 생성
+            # 사용자 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -54,7 +55,7 @@ def init_db():
                     signup_date DATE NOT NULL
                 )
             ''')
-            # 퀴즈 기록 테이블 생성
+            # 퀴즈 기록 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS quiz_history (
                     id SERIAL PRIMARY KEY,
@@ -66,14 +67,13 @@ def init_db():
                 )
             ''')
         conn.commit()
-        print("Database tables checked/created.")
+        print("Database tables checked/created successfully.")
 
+# --- 초기 데이터 삽입 함수 ---
 def populate_db_if_empty():
-    """데이터베이스가 비어있을 경우, 초기 파트와 문제 데이터를 채워넣습니다."""
-    
-    # 이 부분이 모든 문제 데이터를 포함하고 있는 유일한 목록이어야 합니다.
+    """데이터베이스가 비어있을 경우, 초기 문제 데이터를 채워넣습니다."""
     initial_quiz_questions = [
-        # Part 1. 비행이론 (ID: 1-20)
+        # Part 1. 비행이론
         {"id": 1, "part": "Part 1. 비행이론", "question": "항공기가 등속 수평 비행을 할 때, 4가지 힘의 관계로 올바른 것은?", "options": ["양력 > 중력, 추력 > 항력", "양력 = 중력, 추력 = 항력", "양력 < 중력, 추력 < 항력", "양력 = 항력, 추력 = 중력"], "answer": 1, "topic": "비행 원리", "explanation": "등속 수평 비행은 힘의 평형 상태를 의미하며, 수직 방향의 힘(양력과 중력)과 수평 방향의 힘(추력과 항력)이 각각 동일해야 합니다."},
         {"id": 2, "part": "Part 1. 비행이론", "question": "받음각(Angle of Attack)이 임계점을 초과했을 때 발생하는 현상은?", "options": ["급상승", "실속 (Stall)", "음속 돌파", "자동 선회"], "answer": 1, "topic": "비행 원리", "explanation": "임계 받음각을 초과하면 날개 윗면의 공기 흐름이 분리되어 양력을 급격히 잃는 실속(Stall) 현상이 발생합니다."},
         {"id": 3, "part": "Part 1. 비행이론", "question": "날개의 캠버(Camber)가 증가하면 어떤 변화가 일어나는가?", "options": ["양력 계수가 감소한다", "양력 계수가 증가한다", "항력이 감소한다", "추력이 증가한다"], "answer": 1, "topic": "비행 원리", "explanation": "캠버는 날개의 휨 정도로, 캠버가 증가하면 날개 위아래의 압력 차이가 커져 더 큰 양력을 발생시킵니다."},
@@ -134,19 +134,19 @@ def populate_db_if_empty():
     
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            # 1. 파트 데이터 채우기
+            # 1. 파트 데이터 채우기 (테이블이 비어있을 때만 실행)
             cursor.execute("SELECT COUNT(*) FROM parts")
             if cursor.fetchone()[0] == 0:
-                print("Populating 'parts' table...")
+                print("Database 'parts' table is empty. Populating...")
                 parts = sorted(list(set(q['part'] for q in initial_quiz_questions)))
                 for part_name in parts:
                     cursor.execute("INSERT INTO parts (name) VALUES (%s)", (part_name,))
                 print("'parts' table populated.")
             
-            # 2. 문제 데이터 채우기
+            # 2. 문제 데이터 채우기 (테이블이 비어있을 때만 실행)
             cursor.execute("SELECT COUNT(*) FROM questions")
             if cursor.fetchone()[0] == 0:
-                print("Populating 'questions' table...")
+                print("Database 'questions' table is empty. Populating...")
                 cursor.execute("SELECT id, name FROM parts")
                 part_map = {name: id for id, name in cursor.fetchall()}
                 
@@ -163,11 +163,21 @@ def populate_db_if_empty():
                 print("'questions' table populated.")
         conn.commit()
 
-# --- API 엔드포인트 ---
+# ======================================================================
+# ★★★★★ 이 부분이 바로 오류를 해결하는 핵심 코드입니다 ★★★★★
+# Render.com 서버가 시작될 때, 아래 코드가 무조건 실행되도록 하여
+# 데이터베이스에 테이블을 만들고 초기 데이터를 채워 넣습니다.
+with app.app_context():
+    init_db()
+    populate_db_if_empty()
+# ======================================================================
 
-# 사용자를 생성 (회원가입)
+
+# --- API 엔드포인트 (사용자 요청 처리) ---
+
 @app.route('/signup', methods=['POST'])
 def signup():
+    """사용자 회원가입을 처리합니다."""
     data = request.json
     email = data.get('email')
     password = data.get('password')
@@ -188,12 +198,11 @@ def signup():
             conn.commit()
         return jsonify({"success": True, "message": "회원가입이 완료되었습니다! 로그인해주세요."})
     except psycopg2.IntegrityError:
-        # conn.rollback()은 with 구문이 끝나면서 자동으로 처리됩니다.
         return jsonify({"success": False, "message": "이미 사용 중인 이메일입니다."}), 409
 
-# 사용자를 인증 (로그인)
 @app.route('/login', methods=['POST'])
 def login():
+    """사용자 로그인을 처리하고 서비스 만료일을 확인합니다."""
     data = request.json
     email = data.get('email')
     password = data.get('password')
@@ -210,24 +219,25 @@ def login():
     if password_hash != user['password_hash']:
         return jsonify({"success": False, "message": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
     
-    # 서비스 만료일 체크
+    # 서비스 만료일(가입 후 60일) 체크
     if datetime.now().date() > user['signup_date'] + timedelta(days=60):
         return jsonify({"success": False, "message": "서비스 이용 기간이 만료되었습니다."}), 403
 
     return jsonify({"success": True, "message": "로그인 성공! 환영합니다."})
 
-# 파트 목록 가져오기
+
 @app.route('/api/parts', methods=['GET'])
 def get_parts():
+    """모든 파트(과목) 목록을 반환합니다."""
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT * FROM parts ORDER BY id")
             parts = cursor.fetchall()
     return jsonify([dict(row) for row in parts])
 
-# 특정 파트의 문제들 가져오기
 @app.route('/get-questions', methods=['GET'])
 def get_questions():
+    """특정 파트에 해당하는 모든 문제 목록을 반환합니다."""
     part_name = request.args.get('part')
     if not part_name:
         return jsonify({"error": "Part name is required"}), 400
@@ -252,38 +262,32 @@ def get_questions():
     
     return jsonify(questions_list)
 
-# 퀴즈 결과 제출
 @app.route('/submit-quiz', methods=['POST'])
 def submit_quiz():
+    """퀴즈 결과를 받아 채점하고 데이터베이스에 저장합니다."""
     data = request.json
     user_email = data.get('user')
     user_answers = data.get('answers')
     part_name = data.get('part')
 
     if not all([user_email, user_answers, part_name]):
-        return jsonify({"error": "Missing data"}), 400
+        return jsonify({"error": "필수 데이터가 누락되었습니다."}), 400
     
     score = 0
     topic_analysis = {}
     
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            # 해당 파트의 모든 문제 정보를 한 번에 가져옵니다.
-            cursor.execute("""
-                SELECT q.* FROM questions q
-                JOIN parts p ON q.part_id = p.id
-                WHERE p.name = %s
-            """, (part_name,))
+            cursor.execute("SELECT q.* FROM questions q JOIN parts p ON q.part_id = p.id WHERE p.name = %s", (part_name,))
             questions_in_part = {q['id']: q for q in cursor.fetchall()}
             
             if not questions_in_part:
-                return jsonify({"error": "No questions found for this part"}), 404
+                return jsonify({"error": "해당 파트의 문제를 찾을 수 없습니다."}), 404
 
             for answer in user_answers:
                 q_id = answer['questionId']
                 question_info = questions_in_part.get(q_id)
-                if not question_info:
-                    continue
+                if not question_info: continue
 
                 correct_answer_index = question_info['answer']
                 options = json.loads(question_info['options'])
@@ -314,9 +318,9 @@ def submit_quiz():
         "analysis": topic_analysis
     })
 
-# 특정 사용자의 퀴즈 기록 가져오기
 @app.route('/get-history', methods=['POST'])
 def get_history():
+    """특정 사용자의 모든 퀴즈 기록을 반환합니다."""
     user_email = request.json.get('user')
     if not user_email:
         return jsonify({"error": "User email is required"}), 400
@@ -328,31 +332,8 @@ def get_history():
             
     return jsonify([dict(row) for row in history])
 
-
-# --- 관리자 페이지 (선택 사항) ---
-# 이 부분은 필요 없다면 삭제해도 무방합니다.
-
-@app.route('/admin')
-def admin_page():
-    # 간단한 비밀번호 보호 또는 특정 IP만 허용하는 로직 추가를 권장합니다.
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            cursor.execute("SELECT q.*, p.name AS part_name FROM questions q JOIN parts p ON q.part_id = p.id ORDER BY p.id, q.display_order")
-            questions = cursor.fetchall()
-            cursor.execute("SELECT * FROM parts ORDER BY id")
-            parts = cursor.fetchall()
-    
-    # 옵션을 Python 리스트로 변환
-    for q in questions:
-        q['options'] = json.loads(q['options'])
-        
-    return render_template('admin.html', questions=questions, parts=parts)
-
-
-# --- 서버 시작 ---
+# --- 서버 시작 (로컬 테스트용) ---
+# 이 부분은 Render.com 서버에서는 사용되지 않습니다.
 if __name__ == '__main__':
-    # 앱을 실행하기 전에 데이터베이스를 초기화합니다.
-    init_db()
-    populate_db_if_empty()
-    # debug=True는 개발 중에만 사용하고, 실제 배포 시에는 False로 변경하거나 제거하는 것이 좋습니다.
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=True)
+    # 로컬에서 테스트할 때만 실행됩니다.
+    app.run(debug=True)
