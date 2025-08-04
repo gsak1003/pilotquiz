@@ -10,23 +10,68 @@ import json
 app = Flask(__name__)
 CORS(app)
 
+# Render.com 같은 외부 호스팅 환경에서 DATABASE_URL을 가져옵니다.
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# --- 데이터베이스 함수 ---
+# --- 데이터베이스 연결 함수 ---
 def get_db_connection():
+    """데이터베이스 연결을 생성하고 반환합니다."""
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
+# --- 데이터베이스 초기화 함수 ---
 def init_db():
+    """필요한 모든 테이블을 생성합니다."""
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute('CREATE TABLE IF NOT EXISTS parts (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL)')
-            cursor.execute('CREATE TABLE IF NOT EXISTS questions (id SERIAL PRIMARY KEY, part_id INTEGER NOT NULL, question TEXT NOT NULL, options TEXT NOT NULL, answer INTEGER NOT NULL, topic TEXT NOT NULL, explanation TEXT NOT NULL, display_order INTEGER NOT NULL, FOREIGN KEY (part_id) REFERENCES parts (id) ON DELETE CASCADE)')
-            cursor.execute('CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, signup_date TEXT NOT NULL)')
-            cursor.execute('CREATE TABLE IF NOT EXISTS quiz_history (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, date TEXT NOT NULL, score INTEGER NOT NULL, total INTEGER NOT NULL, part TEXT NOT NULL)')
+            # 파트 테이블 생성
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS parts (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL
+                )
+            ''')
+            # 문제 테이블 생성
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS questions (
+                    id SERIAL PRIMARY KEY,
+                    part_id INTEGER NOT NULL,
+                    question TEXT NOT NULL,
+                    options TEXT NOT NULL,
+                    answer INTEGER NOT NULL,
+                    topic TEXT NOT NULL,
+                    explanation TEXT,
+                    display_order INTEGER NOT NULL,
+                    FOREIGN KEY (part_id) REFERENCES parts (id) ON DELETE CASCADE
+                )
+            ''')
+            # 사용자 테이블 생성
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    signup_date DATE NOT NULL
+                )
+            ''')
+            # 퀴즈 기록 테이블 생성
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS quiz_history (
+                    id SERIAL PRIMARY KEY,
+                    user_email TEXT NOT NULL,
+                    date TIMESTAMP NOT NULL,
+                    score INTEGER NOT NULL,
+                    total INTEGER NOT NULL,
+                    part TEXT NOT NULL
+                )
+            ''')
         conn.commit()
+        print("Database tables checked/created.")
 
 def populate_db_if_empty():
+    """데이터베이스가 비어있을 경우, 초기 파트와 문제 데이터를 채워넣습니다."""
+    
+    # 이 부분이 모든 문제 데이터를 포함하고 있는 유일한 목록이어야 합니다.
     initial_quiz_questions = [
         # Part 1. 비행이론 (ID: 1-20)
         {"id": 1, "part": "Part 1. 비행이론", "question": "항공기가 등속 수평 비행을 할 때, 4가지 힘의 관계로 올바른 것은?", "options": ["양력 > 중력, 추력 > 항력", "양력 = 중력, 추력 = 항력", "양력 < 중력, 추력 < 항력", "양력 = 항력, 추력 = 중력"], "answer": 1, "topic": "비행 원리", "explanation": "등속 수평 비행은 힘의 평형 상태를 의미하며, 수직 방향의 힘(양력과 중력)과 수평 방향의 힘(추력과 항력)이 각각 동일해야 합니다."},
@@ -86,97 +131,92 @@ def populate_db_if_empty():
         {"id": 49, "part": "Part 4. 항공기상", "question": "METAR에서 'SCT030'은 무엇을 의미하는가?", "options": ["300피트에 구름이 많음", "3,000피트에 구름이 흩어져 있음", "30,000피트에 구름이 거의 없음", "3,000피트에 구름이 깨져 있음"], "answer": 1, "topic": "항공 기상", "explanation": "METAR에서 SCT는 Scattered(하늘의 3/8~4/8)를, 뒤의 숫자 030은 고도 3,000피트(AGL)를 의미합니다. 따라서 '3,000피트에 구름이 흩어져 있다'는 뜻입니다."},
         {"id": 50, "part": "Part 4. 항공기상", "question": "착빙(Icing)이 가장 발생하기 쉬운 온도 범위는?", "options": ["-20°C ~ -40°C", "0°C ~ -20°C", "0°C ~ 10°C", "-40°C 이하"], "answer": 1, "topic": "항공 기상", "explanation": "착빙은 항공기가 과냉각된 물방울(액체 상태지만 온도는 0°C 이하)이 있는 구름 속을 통과할 때 발생합니다. 이러한 조건은 보통 0°C에서 -20°C 사이의 온도에서 가장 흔하게 나타납니다."}
     ]
-
-def populate_db_if_empty():
-    initial_quiz_questions = [
-        # 회원님의 50개 문제 목록은 이 안에 그대로 있어야 합니다.
-    ]
+    
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
+            # 1. 파트 데이터 채우기
             cursor.execute("SELECT COUNT(*) FROM parts")
             if cursor.fetchone()[0] == 0:
-                print("Populating parts table...")
-                parts = ["Part 1. 비행이론", "Part 2. 비행운용", "Part 3. 항법", "Part 4. 항공기상"]
+                print("Populating 'parts' table...")
+                parts = sorted(list(set(q['part'] for q in initial_quiz_questions)))
                 for part_name in parts:
                     cursor.execute("INSERT INTO parts (name) VALUES (%s)", (part_name,))
-            conn.commit()
-
+                print("'parts' table populated.")
+            
+            # 2. 문제 데이터 채우기
             cursor.execute("SELECT COUNT(*) FROM questions")
             if cursor.fetchone()[0] == 0:
-                print("Populating questions table...")
+                print("Populating 'questions' table...")
                 cursor.execute("SELECT id, name FROM parts")
                 part_map = {name: id for id, name in cursor.fetchall()}
                 
                 for q in initial_quiz_questions:
                     part_id = part_map.get(q['part'])
                     if part_id:
-                        # INSERT 구문에서 id 컬럼을 제외합니다.
                         cursor.execute(
-                            "INSERT INTO questions (part_id, question, options, answer, topic, explanation, display_order) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                            (part_id, q['question'], json.dumps(q['options']), q['answer'], q['topic'], q['explanation'], q['id'])
+                            """
+                            INSERT INTO questions (part_id, question, options, answer, topic, explanation, display_order) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (part_id, q['question'], json.dumps(q['options'], ensure_ascii=False), q['answer'], q['topic'], q['explanation'], q['id'])
                         )
-            conn.commit()
-            print("Done populating database.")
+                print("'questions' table populated.")
+        conn.commit()
 
 # --- API 엔드포인트 ---
 
+# 사용자를 생성 (회원가입)
 @app.route('/signup', methods=['POST'])
 def signup():
-    email = request.form.get('email')
-    password = request.form.get('password')
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+
     if not email or not password:
-        return jsonify({"success": False, "message": "이메일과 비밀번호를 모두 입력해주세요."})
+        return jsonify({"success": False, "message": "이메일과 비밀번호를 모두 입력해주세요."}), 400
+
     password_hash = hashlib.sha256(password.encode()).hexdigest()
-    signup_date = datetime.now().strftime("%Y-%m-%d")
+    signup_date = datetime.now().date()
+
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("INSERT INTO users (email, password_hash, signup_date) VALUES (%s, %s, %s)", (email, password_hash, signup_date))
+                cursor.execute(
+                    "INSERT INTO users (email, password_hash, signup_date) VALUES (%s, %s, %s)",
+                    (email, password_hash, signup_date)
+                )
             conn.commit()
         return jsonify({"success": True, "message": "회원가입이 완료되었습니다! 로그인해주세요."})
     except psycopg2.IntegrityError:
-        conn.rollback()
-        return jsonify({"success": False, "message": "이미 사용 중인 이메일입니다."})
+        # conn.rollback()은 with 구문이 끝나면서 자동으로 처리됩니다.
+        return jsonify({"success": False, "message": "이미 사용 중인 이메일입니다."}), 409
 
+# 사용자를 인증 (로그인)
 @app.route('/login', methods=['POST'])
 def login():
-    email = request.form.get('email')
-    password = request.form.get('password')
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
             user = cursor.fetchone()
+
     if not user:
-        return jsonify({"success": False, "message": "존재하지 않는 사용자입니다."})
+        return jsonify({"success": False, "message": "존재하지 않는 사용자입니다."}), 404
+
     password_hash = hashlib.sha256(password.encode()).hexdigest()
     if password_hash != user['password_hash']:
-        return jsonify({"success": False, "message": "이메일 또는 비밀번호가 올바르지 않습니다."})
-    signup_date = datetime.strptime(user['signup_date'], "%Y-%m-%d")
-    if datetime.now() > signup_date + timedelta(days=60):
-        return jsonify({"success": False, "message": "서비스 이용 기간이 만료되었습니다."})
+        return jsonify({"success": False, "message": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
+    
+    # 서비스 만료일 체크
+    if datetime.now().date() > user['signup_date'] + timedelta(days=60):
+        return jsonify({"success": False, "message": "서비스 이용 기간이 만료되었습니다."}), 403
+
     return jsonify({"success": True, "message": "로그인 성공! 환영합니다."})
 
-@app.route('/get-questions', methods=['GET'])
-def get_questions():
-    part_name = request.args.get('part')
-    questions_list = []
-    if not part_name:
-        return jsonify([])
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            cursor.execute("SELECT id FROM parts WHERE name = %s", (part_name,))
-            part = cursor.fetchone()
-            if not part:
-                return jsonify([])
-            part_id = part['id']
-            cursor.execute("SELECT * FROM questions WHERE part_id = %s ORDER BY display_order", (part_id,))
-            questions_from_db = cursor.fetchall()
-    for q in questions_from_db:
-        question_dict = dict(q)
-        question_dict['options'] = json.loads(question_dict['options'])
-        questions_list.append(question_dict)
-    return jsonify(questions_list)
-    
+# 파트 목록 가져오기
 @app.route('/api/parts', methods=['GET'])
 def get_parts():
     with get_db_connection() as conn:
@@ -185,162 +225,134 @@ def get_parts():
             parts = cursor.fetchall()
     return jsonify([dict(row) for row in parts])
 
+# 특정 파트의 문제들 가져오기
+@app.route('/get-questions', methods=['GET'])
+def get_questions():
+    part_name = request.args.get('part')
+    if not part_name:
+        return jsonify({"error": "Part name is required"}), 400
+
+    questions_list = []
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+            cursor.execute("SELECT id FROM parts WHERE name = %s", (part_name,))
+            part = cursor.fetchone()
+            
+            if not part:
+                return jsonify({"error": "Part not found"}), 404
+            
+            part_id = part['id']
+            cursor.execute("SELECT * FROM questions WHERE part_id = %s ORDER BY display_order", (part_id,))
+            questions_from_db = cursor.fetchall()
+
+    for q in questions_from_db:
+        question_dict = dict(q)
+        question_dict['options'] = json.loads(question_dict['options'])
+        questions_list.append(question_dict)
+    
+    return jsonify(questions_list)
+
+# 퀴즈 결과 제출
 @app.route('/submit-quiz', methods=['POST'])
 def submit_quiz():
     data = request.json
-    user_email = data['user']
-    user_answers = data['answers']
-    part_name = data.get('part', 'Unknown')
+    user_email = data.get('user')
+    user_answers = data.get('answers')
+    part_name = data.get('part')
+
+    if not all([user_email, user_answers, part_name]):
+        return jsonify({"error": "Missing data"}), 400
+    
     score = 0
-    results_details = []
     topic_analysis = {}
+    
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            cursor.execute("SELECT * FROM questions")
-            all_questions = {q['id']: dict(q) for q in cursor.fetchall()}
+            # 해당 파트의 모든 문제 정보를 한 번에 가져옵니다.
+            cursor.execute("""
+                SELECT q.* FROM questions q
+                JOIN parts p ON q.part_id = p.id
+                WHERE p.name = %s
+            """, (part_name,))
+            questions_in_part = {q['id']: q for q in cursor.fetchall()}
+            
+            if not questions_in_part:
+                return jsonify({"error": "No questions found for this part"}), 404
+
             for answer in user_answers:
                 q_id = answer['questionId']
-                question_info = all_questions.get(q_id)
-                if not question_info: continue
-                correct_answer_text = json.loads(question_info['options'])[question_info['answer']]
+                question_info = questions_in_part.get(q_id)
+                if not question_info:
+                    continue
+
+                correct_answer_index = question_info['answer']
+                options = json.loads(question_info['options'])
+                correct_answer_text = options[correct_answer_index]
+                
                 is_correct = (answer['answer'] == correct_answer_text)
+                
                 topic = question_info['topic']
-                if topic not in topic_analysis: topic_analysis[topic] = {'correct': 0, 'total': 0}
+                if topic not in topic_analysis:
+                    topic_analysis[topic] = {'correct': 0, 'total': 0}
                 topic_analysis[topic]['total'] += 1
+                
                 if is_correct:
                     score += 1
                     topic_analysis[topic]['correct'] += 1
-                results_details.append({"questionId": q_id, "userAnswer": answer['answer'], "correctAnswer": correct_answer_text, "isCorrect": is_correct})
             
-            cursor.execute("SELECT COUNT(*) FROM questions q JOIN parts p ON q.part_id = p.id WHERE p.name = %s", (part_name,))
-            total_questions_in_part = cursor.fetchone()[0]
+            total_questions_in_part = len(questions_in_part)
             
-            cursor.execute("INSERT INTO quiz_history (user_email, date, score, total, part) VALUES (%s, %s, %s, %s, %s)", (user_email, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), score, total_questions_in_part, part_name))
+            cursor.execute(
+                "INSERT INTO quiz_history (user_email, date, score, total, part) VALUES (%s, %s, %s, %s, %s)",
+                (user_email, datetime.now(), score, total_questions_in_part, part_name)
+            )
         conn.commit()
-    return jsonify({"score": score, "total": len(user_answers), "results": results_details, "analysis": topic_analysis})
 
+    return jsonify({
+        "score": score, 
+        "total": len(user_answers),
+        "analysis": topic_analysis
+    })
+
+# 특정 사용자의 퀴즈 기록 가져오기
 @app.route('/get-history', methods=['POST'])
 def get_history():
-    user_email = request.json['user']
+    user_email = request.json.get('user')
+    if not user_email:
+        return jsonify({"error": "User email is required"}), 400
+
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT * FROM quiz_history WHERE user_email = %s ORDER BY date DESC", (user_email,))
-            history_from_db = cursor.fetchall()
-    history = [dict(row) for row in history_from_db]
-    return jsonify(history)
+            history = cursor.fetchall()
+            
+    return jsonify([dict(row) for row in history])
 
-# --- 관리자 페이지 기능 ---
+
+# --- 관리자 페이지 (선택 사항) ---
+# 이 부분은 필요 없다면 삭제해도 무방합니다.
+
 @app.route('/admin')
 def admin_page():
+    # 간단한 비밀번호 보호 또는 특정 IP만 허용하는 로직 추가를 권장합니다.
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            cursor.execute("SELECT q.*, p.name AS part_name FROM questions q JOIN parts p ON q.part_id = p.id ORDER BY q.display_order, q.id")
+            cursor.execute("SELECT q.*, p.name AS part_name FROM questions q JOIN parts p ON q.part_id = p.id ORDER BY p.id, q.display_order")
             questions = cursor.fetchall()
-    return render_template('admin.html', questions=questions)
-
-@app.route('/admin/add', methods=['GET', 'POST'])
-def add_question():
-    if request.method == 'POST':
-        part_id = request.form['part_id']
-        question = request.form['question']
-        options = [request.form['option1'], request.form['option2'], request.form['option3'], request.form['option4']]
-        answer = int(request.form['answer'])
-        topic = request.form['topic']
-        explanation = request.form['explanation']
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT MAX(display_order) FROM questions")
-                max_order = cursor.fetchone()[0]
-                next_order = (max_order or 0) + 1
-                cursor.execute('INSERT INTO questions (part_id, question, options, answer, topic, explanation, display_order) VALUES (%s, %s, %s, %s, %s, %s, %s)', (part_id, question, json.dumps(options), answer, topic, explanation, next_order))
-            conn.commit()
-        return redirect(url_for('admin_page'))
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT * FROM parts ORDER BY id")
             parts = cursor.fetchall()
-    return render_template('add_question.html', parts=parts)
+    
+    # 옵션을 Python 리스트로 변환
+    for q in questions:
+        q['options'] = json.loads(q['options'])
+        
+    return render_template('admin.html', questions=questions, parts=parts)
 
-@app.route('/admin/edit/<int:question_id>', methods=['GET', 'POST'])
-def edit_question(question_id):
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            if request.method == 'POST':
-                part_id = request.form['part_id']
-                question_text = request.form['question']
-                options = [request.form['option1'], request.form['option2'], request.form['option3'], request.form['option4']]
-                answer = int(request.form['answer'])
-                topic = request.form['topic']
-                explanation = request.form['explanation']
-                cursor.execute('UPDATE questions SET part_id = %s, question = %s, options = %s, answer = %s, topic = %s, explanation = %s WHERE id = %s', (part_id, question_text, json.dumps(options), answer, topic, explanation, question_id))
-                conn.commit()
-                return redirect(url_for('admin_page'))
-            cursor.execute('SELECT * FROM questions WHERE id = %s', (question_id,))
-            question = cursor.fetchone()
-            cursor.execute('SELECT * FROM parts ORDER BY id')
-            parts = cursor.fetchall()
-    question_dict = dict(question)
-    question_dict['options'] = json.loads(question_dict['options'])
-    return render_template('edit_question.html', question=question_dict, parts=parts)
-
-@app.route('/admin/delete/<int:question_id>', methods=['POST'])
-def delete_question(question_id):
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute('DELETE FROM questions WHERE id = %s', (question_id,))
-        conn.commit()
-    return redirect(url_for('admin_page'))
-
-@app.route('/admin/reorder', methods=['POST'])
-def reorder_questions():
-    orders = request.form
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            for q_id, order in orders.items():
-                if q_id.startswith('order-'):
-                    question_id = int(q_id.split('-')[1])
-                    cursor.execute('UPDATE questions SET display_order = %s WHERE id = %s', (int(order), question_id))
-        conn.commit()
-    return redirect(url_for('admin_page'))
-
-@app.route('/admin/parts')
-def admin_parts_page():
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            cursor.execute("SELECT * FROM parts ORDER BY id")
-            parts = cursor.fetchall()
-    return render_template('admin_parts.html', parts=parts)
-
-@app.route('/admin/parts/add', methods=['POST'])
-def add_part():
-    part_name = request.form['name']
-    if part_name:
-        try:
-            with get_db_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("INSERT INTO parts (name) VALUES (%s)", (part_name,))
-                conn.commit()
-        except psycopg2.IntegrityError:
-            conn.rollback()
-    return redirect(url_for('admin_parts_page'))
-
-@app.route('/admin/parts/delete/<int:part_id>', methods=['POST'])
-def delete_part(part_id):
-    with get_db_connection() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
-            cursor.execute("SELECT COUNT(*) FROM questions WHERE part_id = %s", (part_id,))
-            count = cursor.fetchone()[0]
-            if count > 0:
-                print(f"Cannot delete part {part_id}: it is still in use.")
-            else:
-                cursor.execute("DELETE FROM parts WHERE id = %s", (part_id,))
-        conn.commit()
-    return redirect(url_for('admin_parts_page'))
 
 # --- 서버 시작 ---
-# Render 배포 시에는 이 코드가 자동으로 실행됩니다.
-init_db()
-populate_db_if_empty()
-
 if __name__ == '__main__':
-    app.run(debug=True)
+    # 앱을 실행하기 전에 데이터베이스를 초기화합니다.
+    init_db()
+    populate_db_if_empty()
+    # debug=True는 개발 중에만 사용하고, 실제 배포 시에는 False로 변경하거나 제거하는 것이 좋습니다.
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=True)
