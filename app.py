@@ -1,38 +1,35 @@
 # -*- coding: utf-8 -*-
-from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import psycopg2
 import psycopg2.extras
-import hashlib
+import bcrypt
 import os
 import json
+import traceback
 
 app = Flask(__name__)
 CORS(app)
 
-# Render.com 환경 변수에서 데이터베이스 접속 정보를 가져옵니다.
+# 환경 변수에서 데이터베이스 접속 정보 가져오기
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # --- 데이터베이스 연결 함수 ---
 def get_db_connection():
-    """데이터베이스에 연결하고 커넥션 객체를 반환합니다."""
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 # --- 데이터베이스 테이블 생성 함수 ---
 def init_db():
-    """앱에 필요한 모든 테이블을 생성합니다. (테이블이 이미 존재하면 아무것도 하지 않습니다.)"""
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            # 파트(과목) 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS parts (
                     id SERIAL PRIMARY KEY,
                     name TEXT UNIQUE NOT NULL
                 )
             ''')
-            # 문제 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS questions (
                     id SERIAL PRIMARY KEY,
@@ -46,7 +43,6 @@ def init_db():
                     FOREIGN KEY (part_id) REFERENCES parts (id) ON DELETE CASCADE
                 )
             ''')
-            # 사용자 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -55,7 +51,6 @@ def init_db():
                     signup_date DATE NOT NULL
                 )
             ''')
-            # 퀴즈 기록 테이블
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS quiz_history (
                     id SERIAL PRIMARY KEY,
@@ -71,7 +66,6 @@ def init_db():
 
 # --- 초기 데이터 삽입 함수 ---
 def populate_db_if_empty():
-    """데이터베이스가 비어있을 경우, 초기 문제 데이터를 채워넣습니다."""
     initial_quiz_questions = [
         # Part 1. 비행이론
         {"id": 1, "part": "Part 1. 비행이론", "question": "항공기가 등속 수평 비행을 할 때, 4가지 힘의 관계로 올바른 것은?", "options": ["양력 > 중력, 추력 > 항력", "양력 = 중력, 추력 = 항력", "양력 < 중력, 추력 < 항력", "양력 = 항력, 추력 = 중력"], "answer": 1, "topic": "비행 원리", "explanation": "등속 수평 비행은 힘의 평형 상태를 의미하며, 수직 방향의 힘(양력과 중력)과 수평 방향의 힘(추력과 항력)이 각각 동일해야 합니다."},
@@ -131,26 +125,24 @@ def populate_db_if_empty():
         {"id": 49, "part": "Part 4. 항공기상", "question": "METAR에서 'SCT030'은 무엇을 의미하는가?", "options": ["300피트에 구름이 많음", "3,000피트에 구름이 흩어져 있음", "30,000피트에 구름이 거의 없음", "3,000피트에 구름이 깨져 있음"], "answer": 1, "topic": "항공 기상", "explanation": "METAR에서 SCT는 Scattered(하늘의 3/8~4/8)를, 뒤의 숫자 030은 고도 3,000피트(AGL)를 의미합니다. 따라서 '3,000피트에 구름이 흩어져 있다'는 뜻입니다."},
         {"id": 50, "part": "Part 4. 항공기상", "question": "착빙(Icing)이 가장 발생하기 쉬운 온도 범위는?", "options": ["-20°C ~ -40°C", "0°C ~ -20°C", "0°C ~ 10°C", "-40°C 이하"], "answer": 1, "topic": "항공 기상", "explanation": "착빙은 항공기가 과냉각된 물방울(액체 상태지만 온도는 0°C 이하)이 있는 구름 속을 통과할 때 발생합니다. 이러한 조건은 보통 0°C에서 -20°C 사이의 온도에서 가장 흔하게 나타납니다."}
     ]
-    
+  
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            # 1. 파트 데이터 채우기 (테이블이 비어있을 때만 실행)
             cursor.execute("SELECT COUNT(*) FROM parts")
             if cursor.fetchone()[0] == 0:
                 print("Database 'parts' table is empty. Populating...")
-                parts = sorted(list(set(q['part'] for q in initial_quiz_questions)))
+                parts = sorted(set(q['part'] for q in initial_quiz_questions))
                 for part_name in parts:
                     cursor.execute("INSERT INTO parts (name) VALUES (%s)", (part_name,))
                 print("'parts' table populated.")
-            
-            # 2. 문제 데이터 채우기 (테이블이 비어있을 때만 실행)
+
             cursor.execute("SELECT COUNT(*) FROM questions")
             if cursor.fetchone()[0] == 0:
                 print("Database 'questions' table is empty. Populating...")
                 cursor.execute("SELECT id, name FROM parts")
                 part_map = {name: id for id, name in cursor.fetchall()}
-                
-                for q in initial_quiz_questions:
+
+                for i, q in enumerate(initial_quiz_questions, start=1):
                     part_id = part_map.get(q['part'])
                     if part_id:
                         cursor.execute(
@@ -158,26 +150,19 @@ def populate_db_if_empty():
                             INSERT INTO questions (part_id, question, options, answer, topic, explanation, display_order) 
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
                             """,
-                            (part_id, q['question'], json.dumps(q['options'], ensure_ascii=False), q['answer'], q['topic'], q['explanation'], q['id'])
+                            (part_id, q['question'], json.dumps(q['options'], ensure_ascii=False), q['answer'], q['topic'], q['explanation'], i)
                         )
                 print("'questions' table populated.")
         conn.commit()
 
-# ======================================================================
-# ★★★★★ 이 부분이 바로 오류를 해결하는 핵심 코드입니다 ★★★★★
-# Render.com 서버가 시작될 때, 아래 코드가 무조건 실행되도록 하여
-# 데이터베이스에 테이블을 만들고 초기 데이터를 채워 넣습니다.
+# 초기화 실행
 with app.app_context():
     init_db()
     populate_db_if_empty()
-# ======================================================================
 
-
-# --- API 엔드포인트 (사용자 요청 처리) ---
-
+# --- 사용자 회원가입 ---
 @app.route('/signup', methods=['POST'])
 def signup():
-    """사용자 회원가입을 처리합니다."""
     data = request.json
     email = data.get('email')
     password = data.get('password')
@@ -185,7 +170,7 @@ def signup():
     if not email or not password:
         return jsonify({"success": False, "message": "이메일과 비밀번호를 모두 입력해주세요."}), 400
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     signup_date = datetime.now().date()
 
     try:
@@ -198,11 +183,15 @@ def signup():
             conn.commit()
         return jsonify({"success": True, "message": "회원가입이 완료되었습니다! 로그인해주세요."})
     except psycopg2.IntegrityError:
+        conn.rollback()
         return jsonify({"success": False, "message": "이미 사용 중인 이메일입니다."}), 409
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "message": "서버 오류가 발생했습니다."}), 500
 
+# --- 로그인 ---
 @app.route('/login', methods=['POST'])
 def login():
-    """사용자 로그인을 처리하고 서비스 만료일을 확인합니다."""
     data = request.json
     email = data.get('email')
     password = data.get('password')
@@ -215,29 +204,30 @@ def login():
     if not user:
         return jsonify({"success": False, "message": "존재하지 않는 사용자입니다."}), 404
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    if password_hash != user['password_hash']:
+    if not bcrypt.checkpw(password.encode(), user['password_hash'].encode()):
         return jsonify({"success": False, "message": "이메일 또는 비밀번호가 올바르지 않습니다."}), 401
-    
-    # 서비스 만료일(가입 후 60일) 체크
-    if datetime.now().date() > user['signup_date'] + timedelta(days=60):
+
+    signup_date = user['signup_date']
+    if isinstance(signup_date, datetime):
+        signup_date = signup_date.date()
+
+    if datetime.now().date() > signup_date + timedelta(days=60):
         return jsonify({"success": False, "message": "서비스 이용 기간이 만료되었습니다."}), 403
 
     return jsonify({"success": True, "message": "로그인 성공! 환영합니다."})
 
-
+# --- 파트 리스트 ---
 @app.route('/api/parts', methods=['GET'])
 def get_parts():
-    """모든 파트(과목) 목록을 반환합니다."""
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT * FROM parts ORDER BY id")
             parts = cursor.fetchall()
     return jsonify([dict(row) for row in parts])
 
+# --- 문제 목록 가져오기 ---
 @app.route('/get-questions', methods=['GET'])
 def get_questions():
-    """특정 파트에 해당하는 모든 문제 목록을 반환합니다."""
     part_name = request.args.get('part')
     if not part_name:
         return jsonify({"error": "Part name is required"}), 400
@@ -247,24 +237,21 @@ def get_questions():
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT id FROM parts WHERE name = %s", (part_name,))
             part = cursor.fetchone()
-            
             if not part:
                 return jsonify({"error": "Part not found"}), 404
-            
             part_id = part['id']
             cursor.execute("SELECT * FROM questions WHERE part_id = %s ORDER BY display_order", (part_id,))
-            questions_from_db = cursor.fetchall()
+            questions = cursor.fetchall()
 
-    for q in questions_from_db:
+    for q in questions:
         question_dict = dict(q)
         question_dict['options'] = json.loads(question_dict['options'])
         questions_list.append(question_dict)
-    
     return jsonify(questions_list)
 
+# --- 퀴즈 제출 ---
 @app.route('/submit-quiz', methods=['POST'])
 def submit_quiz():
-    """퀴즈 결과를 받아 채점하고 데이터베이스에 저장합니다."""
     data = request.json
     user_email = data.get('user')
     user_answers = data.get('answers')
@@ -272,55 +259,46 @@ def submit_quiz():
 
     if not all([user_email, user_answers, part_name]):
         return jsonify({"error": "필수 데이터가 누락되었습니다."}), 400
-    
+
     score = 0
     topic_analysis = {}
-    
+
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT q.* FROM questions q JOIN parts p ON q.part_id = p.id WHERE p.name = %s", (part_name,))
-            questions_in_part = {q['id']: q for q in cursor.fetchall()}
-            
-            if not questions_in_part:
+            questions = {q['id']: q for q in cursor.fetchall()}
+            if not questions:
                 return jsonify({"error": "해당 파트의 문제를 찾을 수 없습니다."}), 404
 
             for answer in user_answers:
                 q_id = answer['questionId']
-                question_info = questions_in_part.get(q_id)
-                if not question_info: continue
+                question = questions.get(q_id)
+                if not question:
+                    continue
 
-                correct_answer_index = question_info['answer']
-                options = json.loads(question_info['options'])
-                correct_answer_text = options[correct_answer_index]
-                
-                is_correct = (answer['answer'] == correct_answer_text)
-                
-                topic = question_info['topic']
+                correct_index = question['answer']
+                correct_text = json.loads(question['options'])[correct_index]
+                is_correct = (answer['answer'] == correct_text)
+
+                topic = question['topic']
                 if topic not in topic_analysis:
                     topic_analysis[topic] = {'correct': 0, 'total': 0}
                 topic_analysis[topic]['total'] += 1
-                
                 if is_correct:
-                    score += 1
                     topic_analysis[topic]['correct'] += 1
-            
-            total_questions_in_part = len(questions_in_part)
-            
+                    score += 1
+
             cursor.execute(
                 "INSERT INTO quiz_history (user_email, date, score, total, part) VALUES (%s, %s, %s, %s, %s)",
-                (user_email, datetime.now(), score, total_questions_in_part, part_name)
+                (user_email, datetime.now(), score, len(user_answers), part_name)
             )
         conn.commit()
 
-    return jsonify({
-        "score": score, 
-        "total": len(user_answers),
-        "analysis": topic_analysis
-    })
+    return jsonify({"score": score, "total": len(user_answers), "analysis": topic_analysis})
 
+# --- 히스토리 ---
 @app.route('/get-history', methods=['POST'])
 def get_history():
-    """특정 사용자의 모든 퀴즈 기록을 반환합니다."""
     user_email = request.json.get('user')
     if not user_email:
         return jsonify({"error": "User email is required"}), 400
@@ -329,11 +307,9 @@ def get_history():
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("SELECT * FROM quiz_history WHERE user_email = %s ORDER BY date DESC", (user_email,))
             history = cursor.fetchall()
-            
     return jsonify([dict(row) for row in history])
 
-# --- 서버 시작 (로컬 테스트용) ---
-# 이 부분은 Render.com 서버에서는 사용되지 않습니다.
+# 로컬 실행용
 if __name__ == '__main__':
-    # 로컬에서 테스트할 때만 실행됩니다.
     app.run(debug=True)
+
