@@ -309,6 +309,10 @@ def get_history():
             history = cursor.fetchall()
     return jsonify([dict(row) for row in history])
 
+@app.route('/')
+def home():
+    return 'Flask App is running.'
+
 # 로컬 실행용
 if __name__ == '__main__':
     app.run(debug=True)
